@@ -1,0 +1,8 @@
+version: "2.4"
+
+services:
+  timestamp-app:
+    image: seeker7/timestamp-app:latest
+    init: true
+    build:
+      context: .

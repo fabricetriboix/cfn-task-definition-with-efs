@@ -1,0 +1,142 @@
+Parameters:
+  TaskDefinitionLambdaArn:
+    Type: String
+    Description: ARN of the task-definition Lambda function
+    MinLength: 1
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the VPC where to install things
+
+  VpcCidr:
+    Type: String
+    Description: VPC CIDR block
+    MinLength: 1
+    Default: 172.31.0.0/16
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet of the VPC where to install things
+
+  TimestampAppDockerImage:
+    Type: String
+    Description: URI for the timestamp-app Docker image
+
+Resources:
+
+  # EFS
+
+  EfsMountTargetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the EFS mount target
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: NFSv4 from this VPC
+          IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          CidrIp: !Ref VpcCidr
+
+  Efs:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+
+  EfsMountTarget:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref Efs
+      SubnetId: !Ref SubnetId
+      SecurityGroups: [ !GetAtt EfsMountTargetSecurityGroup.GroupId ]
+
+  # ECS
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+
+  TaskDefinition:
+    Type: Custom::TaskDefinition
+    Properties:
+      ServiceToken: !Ref TaskDefinitionLambdaArn
+      # Everything below is just based on the RegisterTaskDefinition API
+      family: timestamp-app
+      cpu: 256
+      memory: 512
+      executionRoleArn: !GetAtt TaskExecutionRole.Arn
+      taskRoleArn: !GetAtt TaskRole.Arn
+      requiresCompatibilities: [ FARGATE ]
+      networkMode: awsvpc
+      volumes:
+        - name: myefs
+          efsVolumeConfiguration:
+            fileSystemId: !Ref Efs
+      containerDefinitions:
+        - name: timestamp-app
+          image: !Ref TimestampAppDockerImage
+          healthCheck:
+            command: [ CMD-SHELL, "test -e /efs/timestamp" ]
+            interval: 10
+            retries: 2
+            startPeriod: 5
+            timeout: 2
+          essential: true
+          mountPoints:
+            - sourceVolume: myefs
+              containerPath: /efs
+              readOnly: false
+
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the timestamp-app task
+      VpcId: !Ref VpcId
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+
+  TaskService:
+    Type: AWS::ECS::Service
+    DependsOn: EfsMountTarget
+    Properties:
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: FARGATE
+      PlatformVersion: 1.4.0  # NB: > 1.4.0 for EFS support
+      DesiredCount: 1
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups: [ !GetAtt TaskSecurityGroup.GroupId ]
+          Subnets: [ !Ref SubnetId ]
+
+Outputs:
+  EfsId:
+    Description: ID of the EFS
+    Value: !Ref Efs
