@@ -47,7 +47,7 @@ def handler(event, context):
 def handle_request(event):
     ecs_client = boto3.client('ecs')
     request_type = event['RequestType']
-    if request_type == "Create" or request_type == "Delete":
+    if request_type == "Create" or request_type == "Update":
         return register_taskdef(ecs_client, event)
     elif request_type == "Delete":
         return deregister_taskdef(ecs_client, event)
@@ -82,18 +82,20 @@ def register_taskdef(ecs_client, event):
                     health_check['timeout'] = int(health_check['timeout'])
             if 'interactive' in i:
                 i['interactive'] = i['interactive'].lower() == "true"
-            if 'initProcessEnabled' in i:
-                i['initProcessEnabled'] = i['initProcessEnabled'].lower() == "true"
-            if 'maxSwap' in i:
-                i['maxSwap'] = int(i['maxSwap'])
-            if 'sharedMemorySize' in i:
-                i['sharedMemorySize'] = int(i['sharedMemorySize'])
-            if 'swappiness' in i:
-                i['swappiness'] = int(i['swappiness'])
-            if 'tmpfs' in i:
-                for j in i['tmpfs']:
-                    if 'size' in j:
-                        j['size'] = int(j['size'])
+            if 'linuxParameters' in i:
+                p = i['linuxParameters']
+                if 'initProcessEnabled' in p:
+                    p['initProcessEnabled'] = p['initProcessEnabled'].lower() == "true"
+                if 'maxSwap' in p:
+                    p['maxSwap'] = int(p['maxSwap'])
+                if 'sharedMemorySize' in p:
+                    p['sharedMemorySize'] = int(p['sharedMemorySize'])
+                if 'swappiness' in p:
+                    p['swappiness'] = int(p['swappiness'])
+                if 'tmpfs' in p:
+                    for j in p['tmpfs']:
+                        if 'size' in j:
+                            j['size'] = int(j['size'])
             if 'memory' in i:
                 i['memory'] = int(i['memory'])
             if 'memoryReservation' in i:

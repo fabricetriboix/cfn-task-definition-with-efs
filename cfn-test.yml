@@ -111,6 +111,8 @@ Resources:
             - sourceVolume: myefs
               containerPath: /efs
               readOnly: false
+          linuxParameters:
+            initProcessEnabled: true
 
   TaskSecurityGroup:
     Type: AWS::EC2::SecurityGroup
